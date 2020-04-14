@@ -790,3 +790,8 @@ Resources:
                 - Name: SourceCode
             Namespace: ScanAMIVariables
             RunOrder: 1
+
+Outputs:
+  NotificationSNS:
+    Description: SNS Topic that sends notification when report results have been uploaded to S3
+    Value: !Ref InspectorScanCompleteTopic
