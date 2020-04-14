@@ -636,6 +636,9 @@ Resources:
             - Name: AMI_NAME
               Type: PLAINTEXT
               Value: !Ref EnvironmentName
+            - Name: REGION
+              Type: PLAINTEXT
+              Value: !Ref AWS::Region
         Source:
             Type: CODEPIPELINE
             BuildSpec: ./buildspecs/build-ami-buildspec.yaml

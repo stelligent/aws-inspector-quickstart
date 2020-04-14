@@ -2,12 +2,13 @@
     "variables": {
         "inspector_vpc_id": "",
         "commit_id": "",
-        "ami_name": ""
+        "ami_name": "",
+        "region": ""
     },
     
     "builders": [{
         "type": "amazon-ebs",
-        "region": "us-east-1",
+        "region": "{{user `region`}}",
         "source_ami_filter": {
           "filters": {
             "virtualization-type": "hvm",

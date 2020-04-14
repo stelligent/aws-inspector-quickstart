@@ -16,4 +16,4 @@ phases:
   build:
     commands:
       - echo "Hello Inspector"
-      - packer build -var "inspector_vpc_id=$VPC_ID" -var "commit_id=$COMMIT_ID" -var "ami_name=$AMI_NAME" ami.json
+      - packer build -var "inspector_vpc_id=$VPC_ID" -var "commit_id=$COMMIT_ID" -var "ami_name=$AMI_NAME" -var "region=$REGION" ami.json
