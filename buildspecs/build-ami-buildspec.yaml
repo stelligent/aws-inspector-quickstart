@@ -1,0 +1,19 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - apt-get update -y
+      - apt-get install wget unzip -y
+      - export PACKER_RELEASE="1.5.5"
+      - wget https://releases.hashicorp.com/packer/${PACKER_RELEASE}/packer_${PACKER_RELEASE}_linux_amd64.zip
+      - unzip packer_${PACKER_RELEASE}_linux_amd64.zip
+      - mv packer /usr/local/bin
+      - pip install --upgrade pip
+      - pip install --upgrade awscli
+  build:
+    commands:
+      - echo "Hello Inspector"
+      - packer build -var "inspector_vpc_id=$VPC_ID" -var "commit_id=$COMMIT_ID" -var "ami_name=$AMI_NAME" ami.json

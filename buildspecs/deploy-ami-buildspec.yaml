@@ -1,0 +1,15 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - pip install --upgrade pip
+      - pip install --upgrade awscli
+  build:
+    commands:
+      - echo "Hello Inspector"
+      - AMI_ID=$(aws ec2 describe-images --owners ${ACCOUNT_ID} --filters "Name=name,Values=InspectorQuickstart*" "Name=tag:CommitId,Values=${COMMIT_ID}" --query 'sort_by(Images, &CreationDate)'[-1].ImageId | tr -d '"')
+      - echo $AMI_ID
+      - aws cloudformation deploy --template-file aws-inspector-cf.yaml --stack-name "${STACK_NAME}-${COMMIT_ID}"  --no-fail-on-empty-changeset --parameter-overrides AMI=${AMI_ID} KeyPair=${KEY_PAIR} SubnetId=${SUBNET_ID} ec2tag="InspectorPipeline-${COMMIT_ID}" CommitId=${COMMIT_ID} ScanLength=${SCAN_LENGTH}

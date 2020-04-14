@@ -1,0 +1,52 @@
+{
+    "variables": {
+        "inspector_vpc_id": "",
+        "commit_id": "",
+        "ami_name": ""
+    },
+    
+    "builders": [{
+        "type": "amazon-ebs",
+        "region": "us-east-1",
+        "source_ami_filter": {
+          "filters": {
+            "virtualization-type": "hvm",
+            "name": "amzn2-ami-hvm-2.0.*x86_64-ebs",
+            "root-device-type": "ebs"
+          },
+          "owners": ["amazon"],
+          "most_recent": true
+        },
+        "tags": {
+          "Name": "{{user `ami_name`}}-{{timestamp}}",
+          "CommitId": "{{user `commit_id`}}"
+        },
+        "snapshot_tags": {
+          "Name": "{{user `ami_name`}}-{{timestamp}}",
+          "CommitId": "{{user `commit_id`}}"
+        },
+        "instance_type": "t2.micro",
+        "ssh_username": "ec2-user",
+        "associate_public_ip_address": true,
+        "vpc_id": "{{user `inspector_vpc_id`}}",
+        "subnet_filter": {
+            "filters": {
+                "tag:Subnet": "InspectorQuickstart-subnet-1"
+              },
+            "random": true
+        },
+        "ami_name": "{{user `ami_name`}}-{{timestamp}}",
+        "ami_description": "Inspector Quickstart"
+    }],
+    "provisioners": [
+        {
+          "type": "shell",
+          "inline": [
+            "sudo yum update -y",
+            "sudo yum install -y wget",
+            "wget https://inspector-agent.amazonaws.com/linux/latest/install",
+            "sudo bash install"
+          ]
+        }
+      ]
+}

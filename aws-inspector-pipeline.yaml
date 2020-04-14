@@ -1,0 +1,788 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS-Inspector-Pipeline"
+
+Parameters:
+  GitHubToken:
+    Type: String
+    NoEcho: true
+  RepositoryName:
+    Type: String
+    NoEcho: true
+  RepositoryOwner:
+    Type: String
+    NoEcho: true
+  BranchName:
+    Type: String
+  CodebuildImage:
+    Type: String
+    Default: "aws/codebuild/standard:4.0"
+  EnvironmentName:
+    Type: String
+    Default: "InspectorQuickstart"
+  VpcCIDR:
+    Type: String
+    Default: 10.192.0.0/16
+  PublicSubnet1CIDR:
+    Type: String
+    Default: 10.192.10.0/24
+  PublicSubnet2CIDR:
+    Type: String
+    Default: 10.192.11.0/24
+  KeyPair:
+    Description: Key pair to launch ec2 instance
+    Type: AWS::EC2::KeyPair::KeyName
+  ScanLength:
+    Type: Number
+    Description: Duration of Inspector Scan in seconds
+    Default: 180
+
+Mappings: 
+  RegionMap:
+    us-east-1:
+      InspectorAccountID: arn:aws:iam::316112463485:root
+    us-east-2:
+      InspectorAccountID: arn:aws:iam::646659390643:root
+    us-west-1:
+      InspectorAccountID: arn:aws:iam::166987590008:root
+    us-west-2:
+      InspectorAccountID: arn:aws:iam::758058086616:root
+    ap-south-1:
+      InspectorAccountID: arn:aws:iam::162588757376:root
+    ap-northeast-2:
+      InspectorAccountID: arn:aws:iam::526946625049:root
+    ap-southeast-2:
+      InspectorAccountID: arn:aws:iam::454640832652:root
+    ap-northeast-1:
+      InspectorAccountID: arn:aws:iam::406045910587:root
+    eu-central-1:
+      InspectorAccountID: arn:aws:iam::537503971621:root
+    eu-west-1:
+      InspectorAccountID: arn:aws:iam::357557129151:root
+    eu-west-2:
+      InspectorAccountID: arn:aws:iam::146838936955:root
+    eu-north-1:
+      InspectorAccountID: arn:aws:iam::453420244670:root
+    us-gov-east-1:
+      InspectorAccountID: arn:aws:iam::206278770380:root
+    us-gov-west-1:
+      InspectorAccountID: arn:aws:iam::850862329162:root
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-VPC"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-IGW"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-subnet-1"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Subnet
+          Value: !Sub "${EnvironmentName}-subnet-1"
+  
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-subnet-2"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Subnet
+          Value: !Sub "${EnvironmentName}-subnet-2"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-public-rt"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  StateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline-state-bucket"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline-reports-bucket"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  InspectorTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline-inspector-sns-topic"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+      Subscription:
+        - Protocol: lambda
+          Endpoint: !GetAtt InspectorLambda.Arn
+
+  InspectorTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Id: MyTopicPolicy
+        Version: '2012-10-17'
+        Statement:
+        - Sid: InpspectorAWSAccount
+          Effect: Allow
+          Principal:
+            AWS: !FindInMap [RegionMap, !Ref "AWS::Region", InspectorAccountID]
+          Action: sns:Publish
+          Resource: !Ref InspectorTopic
+      Topics:
+      - !Ref InspectorTopic
+
+  InspectorScanCompleteTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline-scan-complete-sns-topic"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  CodepipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "codepipeline.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Description: !Sub  "Execution Role for ${AWS::StackName} codepipeline"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-code-pipeline-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: S3StateBucket
+                Effect: Allow
+                Action:
+                  - "s3:GetObject*"
+                  - "s3:PutObject*"
+                  - "s3:DeleteObject*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}*"
+              - Sid: "codebuilds"
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                 - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${AWS::StackName}-build-ami"
+                 - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${AWS::StackName}-deploy-ami"
+                 - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${AWS::StackName}-scan-ami"
+                 - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${AWS::StackName}-tear-down-ami"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "codebuild.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Description: !Sub  "Execution Role for ${AWS::StackName} codebuild"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-code-build-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: AccessToPipelineS3Bucket
+                Effect: Allow
+                Action:
+                  - "s3:GetObject*"
+                  - "s3:PutObject*"
+                  - "s3:DeleteObject*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}*"
+              - Sid: cloudwatch
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Sid: packer
+                Effect: Allow
+                Action:
+                  - "ec2:AttachVolume"
+                  - "ec2:AuthorizeSecurityGroupIngress"
+                  - "ec2:CopyImage"
+                  - "ec2:CreateImage"
+                  - "ec2:CreateKeypair"
+                  - "ec2:CreateSecurityGroup"
+                  - "ec2:CreateSnapshot"
+                  - "ec2:CreateTags"
+                  - "ec2:CreateVolume"
+                  - "ec2:DeleteKeyPair"
+                  - "ec2:DeleteSecurityGroup"
+                  - "ec2:DeleteSnapshot"
+                  - "ec2:DeleteVolume"
+                  - "ec2:DeregisterImage"
+                  - "ec2:DescribeImageAttribute"
+                  - "ec2:DescribeImages"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceStatus"
+                  - "ec2:DescribeRegions"
+                  - "ec2:DescribeSecurityGroups"
+                  - "ec2:DescribeSnapshots"
+                  - "ec2:DescribeSubnets"
+                  - "ec2:DescribeTags"
+                  - "ec2:DescribeVolumes"
+                  - "ec2:DetachVolume"
+                  - "ec2:GetPasswordData"
+                  - "ec2:ModifyImageAttribute"
+                  - "ec2:ModifyInstanceAttribute"
+                  - "ec2:ModifySnapshotAttribute"
+                  - "ec2:RegisterImage"
+                  - "ec2:RunInstances"
+                  - "ec2:StopInstances"
+                  - "ec2:TerminateInstances"
+                Resource:
+                  - "*"
+              - Sid: cloudformation
+                Effect: Allow
+                Action:
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:UpdateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:CreateChangeSet"
+                  - "cloudformation:DeleteChangeSet"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:List*"
+                  - "cloudformation:Describe*"
+                  - "cloudformation:Get*"
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}*"
+              - Sid: ec2keypairs
+                Effect: Allow
+                Action:
+                  - "ec2:DescribeKeyPairs"
+                Resource:
+                  - "*"
+              - Sid: inspector
+                Effect: Allow
+                Action:
+                  - "inspector:CreateAssessmentTarget"
+                  - "inspector:CreateAssessmentTemplate"
+                  - "inspector:DeleteAssessmentRun"
+                  - "inspector:DeleteAssessmentTarget"
+                  - "inspector:DeleteAssessmentTemplate"
+                  - "inspector:DescribeAssessmentRuns"
+                  - "inspector:DescribeAssessmentTargets"
+                  - "inspector:DescribeAssessmentTemplates"
+                  - "inspector:DescribeFindings"
+                  - "inspector:DescribeResourceGroups"
+                  - "inspector:GetAssessmentReport"
+                  - "inspector:DescribeRulesPackages"
+                  - "inspector:CreateResourceGroup"
+                  - "inspector:StartAssessmentRun"
+                  - "inspector:SubscribeToEvent"
+                  - "inspector:UnsubscribeFromEvent"
+                  - "inspector:ListEventSubscriptions"
+                  - "inspector:UpdateAssessmentTarget"
+                Resource:
+                  - "*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codebuild-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Description: !Sub  "Execution Role for ${AWS::StackName} lambda"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-lambda-policy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: AccessToPipelineS3Bucket
+                Effect: Allow
+                Action:
+                  - "s3:GetObject*"
+                  - "s3:PutObject*"
+                  - "s3:DeleteObject*"
+                Resource:
+                  - !Sub "arn:aws:s3:::${AWS::StackName}*"
+              - Sid: cloudwatch
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              - Sid: packer
+                Effect: Allow
+                Action:
+                  - "ec2:AttachVolume"
+                  - "ec2:AuthorizeSecurityGroupIngress"
+                  - "ec2:CopyImage"
+                  - "ec2:CreateImage"
+                  - "ec2:CreateKeypair"
+                  - "ec2:CreateSecurityGroup"
+                  - "ec2:CreateSnapshot"
+                  - "ec2:CreateTags"
+                  - "ec2:CreateVolume"
+                  - "ec2:DeleteKeyPair"
+                  - "ec2:DeleteSecurityGroup"
+                  - "ec2:DeleteSnapshot"
+                  - "ec2:DeleteVolume"
+                  - "ec2:DeregisterImage"
+                  - "ec2:DescribeImageAttribute"
+                  - "ec2:DescribeImages"
+                  - "ec2:DescribeInstances"
+                  - "ec2:DescribeInstanceStatus"
+                  - "ec2:DescribeRegions"
+                  - "ec2:DescribeSecurityGroups"
+                  - "ec2:DescribeSnapshots"
+                  - "ec2:DescribeSubnets"
+                  - "ec2:DescribeTags"
+                  - "ec2:DescribeVolumes"
+                  - "ec2:DetachVolume"
+                  - "ec2:GetPasswordData"
+                  - "ec2:ModifyImageAttribute"
+                  - "ec2:ModifyInstanceAttribute"
+                  - "ec2:ModifySnapshotAttribute"
+                  - "ec2:RegisterImage"
+                  - "ec2:RunInstances"
+                  - "ec2:StopInstances"
+                  - "ec2:TerminateInstances"
+                Resource:
+                  - "*"
+              - Sid: cloudformation
+                Effect: Allow
+                Action:
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:UpdateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:CreateChangeSet"
+                  - "cloudformation:DeleteChangeSet"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:List*"
+                  - "cloudformation:Describe*"
+                  - "cloudformation:Get*"
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}*"
+              - Sid: inspector
+                Effect: Allow
+                Action:
+                  - "inspector:CreateAssessmentTarget"
+                  - "inspector:CreateAssessmentTemplate"
+                  - "inspector:DeleteAssessmentRun"
+                  - "inspector:DeleteAssessmentTarget"
+                  - "inspector:DeleteAssessmentTemplate"
+                  - "inspector:DescribeAssessmentRuns"
+                  - "inspector:DescribeAssessmentTargets"
+                  - "inspector:DescribeAssessmentTemplates"
+                  - "inspector:DescribeFindings"
+                  - "inspector:DescribeResourceGroups"
+                  - "inspector:GetAssessmentReport"
+                  - "inspector:DescribeRulesPackages"
+                  - "inspector:CreateResourceGroup"
+                  - "inspector:StartAssessmentRun"
+                  - "inspector:SubscribeToEvent"
+                  - "inspector:UnsubscribeFromEvent"
+                  - "inspector:ListEventSubscriptions"
+                  - "inspector:UpdateAssessmentTarget"
+                Resource:
+                  - "*"
+              - Sid: sns
+                Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource:
+                  - !Ref InspectorScanCompleteTopic
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-lambda-role"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+  
+  InspectorLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Code: 
+        ZipFile: |
+          import json, os, logging, boto3, urllib.request, shutil
+          from datetime import datetime as dt
+
+          logger = logging.getLogger('InspectorQuickstart')
+          logger.setLevel(logging.DEBUG)
+
+          inspectorClient = boto3.client('inspector')
+          cloudformationClient = boto3.client('cloudformation')
+          s3Client = boto3.client('s3')
+          snsClient = boto3.client('sns')
+          reports_bucket = os.environ["REPORTS_BUCKET"]
+          notification_topic = os.environ["REPORT_COMPLETE_SNS"]
+
+
+          def get_template_user_attributes(assement_template_arn):
+              user_attributes = {}
+              response = inspectorClient.describe_assessment_templates(
+                  assessmentTemplateArns=[
+                      assement_template_arn,
+                  ]
+              )
+              logger.info(response)
+              if "assessmentTemplates" in response:
+                  for template in response["assessmentTemplates"]:
+                      for user_att in template["userAttributesForFindings"]:
+                          user_attributes[user_att["key"]] = user_att["value"]
+
+              return user_attributes
+
+          def generate_report(run_arn):
+              while True:
+                  response = inspectorClient.get_assessment_report(
+                      assessmentRunArn=run_arn,
+                      reportFileFormat="HTML",
+                      reportType="FULL",
+                  )
+                  if "url" in response:
+                      break
+              url = response["url"]
+              logger.info(url)
+              return url
+
+          def download_report(url, user_attributes):
+              report_name = user_attributes["AMI_ID"] + "-inspector-report.html"
+              temp_file = "/tmp/" + report_name
+              
+              with urllib.request.urlopen(url=url) as response,  open(temp_file, "wb") as out_file:
+                  shutil.copyfileobj(response, out_file)
+              logger.info(response)
+
+              current_date = dt.now().strftime("%m-%d-%Y")
+
+              report_to_upload = open(temp_file, "rb")
+              s3_report_key = current_date + "/" + user_attributes["CommitId"] + "/" + report_name
+              s3_response = s3Client.put_object(
+                  Bucket=reports_bucket,
+                  Key=s3_report_key,
+                  Body=report_to_upload,
+              )
+              logger.info(s3_response)
+
+              s3_report_location = "s3://" + reports_bucket + "/" + s3_report_key
+              logger.info("Report Location: %s", s3_report_location)
+
+              return s3_report_location
+
+          def notify_scan_completion(ami_id, report_location):
+              subject = "Inspector Scan Completion for AMI: " + ami_id
+              message = "Scan Results for " + ami_id + " are located at: " + report_location
+              response = snsClient.publish(
+                  TopicArn=notification_topic,
+                  Message=message,
+                  Subject=subject,
+              )
+              logger.info(response)
+              return response
+
+          def cleanup_scan_resources(stack_name):
+              response = cloudformationClient.delete_stack(
+                  StackName=stack_name,
+              )
+              return response
+
+          def handler(event, context):
+              print("Event: %s" % json.dumps(event))
+              for record in event["Records"]:
+                  message = json.loads(record["Sns"]["Message"])
+                  
+              if message["event"] == "ENABLE_ASSESSMENT_NOTIFICATIONS":
+                  response = { 'message' : "Scan is not complete" }  
+              elif message["event"] == "ASSESSMENT_RUN_COMPLETED":
+                  user_attributes = get_template_user_attributes(assement_template_arn=message["template"])
+                  report_url = generate_report(run_arn=message["run"])
+                  report_location = download_report(url=report_url, user_attributes=user_attributes)
+                  sns_response = notify_scan_completion(ami_id=user_attributes["AMI_ID"], report_location=report_location)
+                  cleanup_response = cleanup_scan_resources(stack_name=user_attributes["StackName"])
+                  return cleanup_response
+
+              return response
+      Description: Lambda function to download inspector report and cleanup stack
+      Environment:
+        Variables:
+          REPORTS_BUCKET: !Ref ReportsBucket
+          REPORT_COMPLETE_SNS: !Ref InspectorScanCompleteTopic
+      Handler: index.handler
+      MemorySize: 1024
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.7
+      Tags: 
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-lambda"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+      Timeout: 600
+
+  SNSLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt InspectorLambda.Arn
+      Principal: sns.amazonaws.com   
+
+  BuildAMI:
+    Type: AWS::CodeBuild::Project
+    Properties:
+        Name: !Sub "${AWS::StackName}-build-ami"
+        Artifacts:
+          Type: CODEPIPELINE
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: !Ref CodebuildImage
+          EnvironmentVariables:
+            - Name: VPC_ID
+              Type: PLAINTEXT
+              Value: !Ref VPC
+            - Name: AMI_NAME
+              Type: PLAINTEXT
+              Value: !Ref EnvironmentName
+        Source:
+            Type: CODEPIPELINE
+            BuildSpec: ./buildspecs/build-ami-buildspec.yaml
+        ServiceRole: !GetAtt CodeBuildRole.Arn
+        Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codebuild-build-ami"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  DeployAMI:
+    Type: AWS::CodeBuild::Project
+    Properties:
+        Name: !Sub "${AWS::StackName}-deploy-ami"
+        Artifacts:
+          Type: CODEPIPELINE
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: !Ref CodebuildImage
+          EnvironmentVariables:
+            - Name: ACCOUNT_ID
+              Type: PLAINTEXT
+              Value: !Ref AWS::AccountId
+            - Name: STACK_NAME
+              Type: PLAINTEXT
+              Value: !Ref AWS::StackName
+            - Name: KEY_PAIR
+              Type: PLAINTEXT
+              Value: !Ref KeyPair
+            - Name: SUBNET_ID
+              Type: PLAINTEXT
+              Value: !Ref PublicSubnet2
+            - Name: SCAN_LENGTH
+              Type: PLAINTEXT
+              Value: !Ref ScanLength
+        Source:
+            Type: CODEPIPELINE
+            BuildSpec: ./buildspecs/deploy-ami-buildspec.yaml
+        ServiceRole: !GetAtt CodeBuildRole.Arn
+        Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codebuild-deploy-ami"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ScanAMI:
+    Type: AWS::CodeBuild::Project
+    Properties:
+        Name: !Sub "${AWS::StackName}-scan-ami"
+        Artifacts:
+          Type: CODEPIPELINE
+        Environment:
+          Type: LINUX_CONTAINER
+          ComputeType: BUILD_GENERAL1_SMALL
+          Image: !Ref CodebuildImage
+          EnvironmentVariables:
+            - Name: STACK_NAME
+              Type: PLAINTEXT
+              Value: !Ref AWS::StackName
+            - Name: SNS_TOPIC_ARN
+              Type: PLAINTEXT
+              Value: !Ref InspectorTopic
+        Source:
+            Type: CODEPIPELINE
+            BuildSpec: ./buildspecs/scan-ami-buildspec.yaml
+        ServiceRole: !GetAtt CodeBuildRole.Arn
+        Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codebuild-scan-ami"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  Codepipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref StateBucket
+      Name: !Sub "${AWS::StackName}-codepipeline"
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt CodepipelineRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "${EnvironmentName}-codepipeline"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+      Stages:
+        - Name: Source
+          Actions:
+            -
+              Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: !Ref RepositoryOwner
+                Repo: !Ref RepositoryName
+                Branch: !Ref BranchName
+                OAuthToken: !Ref GitHubToken
+                PollForSourceChanges: true
+              OutputArtifacts:
+                - Name: SourceCode
+              Namespace: SourceVariables
+        - Name: BuildAMI
+          Actions:
+          - Name: BuildAMI
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: 1
+            Configuration:
+                ProjectName: !Ref BuildAMI
+                EnvironmentVariables: '[{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+            InputArtifacts:
+                - Name: SourceCode
+            Namespace: BuildAMIVariables
+        - Name: DeployAMI
+          Actions:
+          - Name: DeployAMI
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: 1
+            Configuration:
+                ProjectName: !Ref DeployAMI
+                EnvironmentVariables: '[{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+            InputArtifacts:
+                - Name: SourceCode
+            Namespace: DeployAMIVariables
+            RunOrder: 1
+        - Name: ScanAMI
+          Actions:
+          - Name: ScanAMI
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: 1
+            Configuration:
+                ProjectName: !Ref ScanAMI
+                EnvironmentVariables: '[{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+            InputArtifacts:
+                - Name: SourceCode
+            Namespace: ScanAMIVariables
+            RunOrder: 1
