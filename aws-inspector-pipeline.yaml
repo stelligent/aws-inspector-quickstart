@@ -13,6 +13,7 @@ Parameters:
     NoEcho: true
   BranchName:
     Type: String
+    Default: "master"
   CodebuildImage:
     Type: String
     Default: "aws/codebuild/standard:4.0"
