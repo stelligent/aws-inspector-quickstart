@@ -795,3 +795,6 @@ Outputs:
   NotificationSNS:
     Description: SNS Topic that sends notification when report results have been uploaded to S3
     Value: !Ref InspectorScanCompleteTopic
+  ReportsBucket:
+    Description: S3 location where all completed scan results are located
+    Value: !Ref ReportsBucket
