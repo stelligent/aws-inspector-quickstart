@@ -20,11 +20,13 @@
         },
         "tags": {
           "Name": "{{user `ami_name`}}-{{timestamp}}",
-          "CommitId": "{{user `commit_id`}}"
+          "CommitId": "{{user `commit_id`}}",
+          "HardeningPreformed": "false"
         },
         "snapshot_tags": {
           "Name": "{{user `ami_name`}}-{{timestamp}}",
-          "CommitId": "{{user `commit_id`}}"
+          "CommitId": "{{user `commit_id`}}",
+          "HardeningPreformed": "false"
         },
         "instance_type": "t2.micro",
         "ssh_username": "ec2-user",

@@ -1,0 +1,90 @@
+{
+    "variables": {
+        "inspector_vpc_id": "",
+        "commit_id": "",
+        "ami_name": "",
+        "region": ""
+    },
+    
+    "builders": [{
+        "type": "amazon-ebs",
+        "region": "{{user `region`}}",
+        "source_ami_filter": {
+          "filters": {
+            "virtualization-type": "hvm",
+            "name": "amzn2-ami-hvm-2.0.*x86_64-ebs",
+            "root-device-type": "ebs"
+          },
+          "owners": ["amazon"],
+          "most_recent": true
+        },
+        "tags": {
+          "Name": "{{user `ami_name`}}-{{timestamp}}",
+          "CommitId": "{{user `commit_id`}}",
+          "HardeningPreformed": "true"
+        },
+        "snapshot_tags": {
+          "Name": "{{user `ami_name`}}-{{timestamp}}",
+          "CommitId": "{{user `commit_id`}}",
+          "HardeningPreformed": "true"
+        },
+        "instance_type": "t2.micro",
+        "ssh_username": "ec2-user",
+        "associate_public_ip_address": true,
+        "vpc_id": "{{user `inspector_vpc_id`}}",
+        "subnet_filter": {
+            "filters": {
+                "tag:Subnet": "InspectorQuickstart-subnet-1"
+              },
+            "random": true
+        },
+        "ami_name": "{{user `ami_name`}}-{{timestamp}}",
+        "ami_description": "Inspector Quickstart"
+    }],
+    "provisioners": [
+        {
+          "type": "shell",
+          "inline": [
+            "sudo yum update -y",
+            "sudo yum install -y wget",
+            "wget https://inspector-agent.amazonaws.com/linux/latest/install",
+            "sudo bash install"
+          ]
+        },
+        {
+          "type": "shell",
+          "execute_command": "echo 'packer' | sudo -S env {{ .Vars }} {{ .Path }}",
+          "inline": [
+            "sudo echo \"Hello Inspector SSH Banner\" > /etc/ssh/sshd-banner",
+            "sudo echo \"Banner /etc/ssh/sshd-banner\" > /etc/ssh/sshd_config",
+            "sudo echo \"Protocol 2\" >> /etc/ssh/sshd_config",
+            "sudo echo \"LogLevel VERBOSE\" >> /etc/ssh/sshd_config",
+            "sudo echo \"X11Forwarding no\" >> /etc/ssh/sshd_config",
+            "sudo echo \"MaxAuthTries 4\" >> /etc/ssh/sshd_config",
+            "sudo echo \"IgnoreRhosts yes\" >> /etc/ssh/sshd_config",
+            "sudo echo \"HostbasedAuthentication no\" >> /etc/ssh/sshd_config",
+            "sudo echo \"PermitRootLogin no\" >> /etc/ssh/sshd_config",
+            "sudo echo \"PermitEmptyPasswords no\" >> /etc/ssh/sshd_config",
+            "sudo echo \"PermitUserEnvironment no\" >> /etc/ssh/sshd_config",
+            "sudo echo \"Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr\" >> /etc/ssh/sshd_config",
+            "sudo echo \"MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256\" >> /etc/ssh/sshd_config",
+            "sudo echo \"KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,ecdh-sha2-nistp521,ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group-exchange-sha256\" >> /etc/ssh/sshd_config",
+            "sudo echo \"ClientAliveInterval 300\" >> /etc/ssh/sshd_config",
+            "sudo echo \"ClientAliveCountMax 0\" >> /etc/ssh/sshd_config",
+            "sudo echo \"LoginGraceTime 60\" >> /etc/ssh/sshd_config",
+            "sudo chown root:root /etc/crontab",
+            "sudo chmod og-rwx /etc/crontab",
+            "sudo chown root:root /etc/cron.hourly",
+            "sudo chmod og-rwx /etc/cron.hourly",
+            "sudo chown root:root /etc/cron.daily",
+            "sudo chmod og-rwx /etc/cron.daily",
+            "sudo chown root:root /etc/cron.weekly",
+            "sudo chmod og-rwx /etc/cron.weekly",
+            "sudo chown root:root /etc/cron.monthly",
+            "sudo chmod og-rwx /etc/cron.monthly",
+            "sudo chown root:root /etc/cron.d",
+            "sudo chmod og-rwx /etc/cron.d"
+          ]
+        }
+      ]
+}

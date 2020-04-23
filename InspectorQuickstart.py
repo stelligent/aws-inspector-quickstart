@@ -1,6 +1,7 @@
 import boto3
 import logging
 import os
+from time import sleep
 
 class InspectorQuickstart:
     def __init__(self):
@@ -38,8 +39,13 @@ class InspectorQuickstart:
         return response
 
     def start_run(self):
-        response = self.inspectorClient.start_assessment_run(assessmentTemplateArn=self.inspector_stack_output["AssessmentTemplate"])
-        assessment_run_arn = response["assessmentRunArn"]
-        self.logger.info(assessment_run_arn)
+        while True:
+            try:
+                response = self.inspectorClient.start_assessment_run(assessmentTemplateArn=self.inspector_stack_output["AssessmentTemplate"])
+                assessment_run_arn = response["assessmentRunArn"]
+                self.logger.info(assessment_run_arn)
+                break
+            except:
+                sleep(5)
 
         return assessment_run_arn

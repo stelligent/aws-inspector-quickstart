@@ -24,5 +24,16 @@ All parameters are located in the `aws-inspector-pipeline.yaml`
 - Inspector scan duration can be set by updating the value for the parameter `ScanLength` in the `aws-inspector-pipeline.yaml`.  
 - The unit of time is in seconds.  The default value is set to 3 minutes. 
 
+## Acceptance Test:
+Steps to run `verify_resources.py`
+
+1. Configure a default AWS profile or the AWS environment variables on the machine intended to run the script
+2. Have Python 3 installed on the machine intended to run the script
+3. Install the dependencies listed in the `requirements.txt` file from the repository
+4. Provide the name of the Inspector Pipeline Cloudformation stack as a command line argument
+
+
+The test will call the AWS api using boto3 and print the CodePipeline name, Lambda function name, S3 reports bucket name and the ARN of the SNS topic used to notify the user when new scans complete.
+
 ## Architecture Diagram
 ![architecture diagram](inspector-quickstart-diagram.svg)

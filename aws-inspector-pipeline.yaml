@@ -36,6 +36,13 @@ Parameters:
     Type: Number
     Description: Duration of Inspector Scan in seconds
     Default: 180
+  PackerFile:
+    Type: String
+    Description: Filename of Packer builder to use
+    Default: ami.json
+    AllowedValues:
+      - ami.json
+      - hardened_ami.json
 
 Mappings: 
   RegionMap:
@@ -640,6 +647,9 @@ Resources:
             - Name: REGION
               Type: PLAINTEXT
               Value: !Ref AWS::Region
+            - Name: PACKER_FILE
+              Type: PLAINTEXT
+              Value: !Ref PackerFile
         Source:
             Type: CODEPIPELINE
             BuildSpec: ./buildspecs/build-ami-buildspec.yaml
@@ -798,3 +808,9 @@ Outputs:
   ReportsBucket:
     Description: S3 location where all completed scan results are located
     Value: !Ref ReportsBucket
+  CodePipelineName:
+    Description: CodePipeline Name
+    Value: !Ref Codepipeline
+  LambdaFunctionName:
+    Description: Lambda Function Name
+    Value: !Ref InspectorLambda
